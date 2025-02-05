@@ -1,0 +1,16 @@
+# .Gitignore file
+
+*/__pycache__/*
+*.pyc
+stash/
+training_logs/
+output/
+datasets/
+*.old
+*.png
+*.pth
+.vscode/
+model_DDPM*
+*.fits
+temp*
+output*
