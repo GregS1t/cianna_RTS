@@ -18,6 +18,8 @@ const { v4: uuidv4 } = require("uuid");     // to generate unique IDs
 const app = express();
 const port = 3000;
 
+// Current directory
+const CURRENT_DIR = __dirname;
 // Output directory for CSV files
 const OUTPUT_DIR = path.join(__dirname, "output");
 if (!fs.existsSync(OUTPUT_DIR)) {
@@ -45,7 +47,7 @@ let jobs = {};
 // Endpoint pour recevoir le fichier XML et lancer le traitement asynchrone
 app.post("/upload", upload.fields([{ name: 'xml', maxCount: 1 }, { name: 'fits', maxCount: 1 }]), (req, res) => {
     const process_id = uuidv4();
-    jobs[process_id] = { status: "PROCESSING", csvFile: null, fitsfile: null };
+    jobs[process_id] = { status: "PROCESSING", predFile: null, fitsFile: null };
 
 
     if (!req.files || !req.files.xml || req.files.xml.length === 0) {
@@ -71,9 +73,11 @@ app.post("/upload", upload.fields([{ name: 'xml', maxCount: 1 }, { name: 'fits',
     }
 
     // Path to the output CSV file
-    const outputCsvPath = path.join(OUTPUT_DIR, `output_${process_id}.csv`);
+    const prediction_file = `./fwd_res/net0_rts_`+process_id+`.dat`;
+    const outputPredPath = path.join(CURRENT_DIR, prediction_file);
+    // console.log("Output prediction file path: ", outputPredPath);
     
-    console.log("FITS file path: ", fitsFilePath);
+    // console.log("FITS file path: ", fitsFilePath);
     //
     // Check if the FITS file is valid
     //
@@ -109,7 +113,7 @@ app.post("/upload", upload.fields([{ name: 'xml', maxCount: 1 }, { name: 'fits',
             if (code === 0) {
                 console.log(`Job ${process_id} terminated with success.`);
                 jobs[process_id].status = "COMPLETED";
-                jobs[process_id].csvFile = outputCsvPath;
+                jobs[process_id].predFile = outputPredPath;
             } else {
                 console.error(`Job ${process_id} failed with code ${code}`);
                 jobs[process_id].status = "ERROR";
@@ -120,34 +124,6 @@ app.post("/upload", upload.fields([{ name: 'xml', maxCount: 1 }, { name: 'fits',
             //});
         });
 
-
-        //
-        // TEST - CONVERT THE XML FILE TO CSV AND RETURN THE CSV FILE
-        // 
-        // const pythonConvertXML2CSV = spawn("python3", [pythonFilePath, xmlFilePath, outputCsvPath]);
-
-        // pythonConvertXML2CSV.stdout.on("data", (data) => {
-        //     console.log(`Job ${process_id} - stdout: ${data.toString()}`);
-        // });
-        // pythonConvertXML2CSV.stderr.on("data", (data) => {
-        //     console.error(`Job ${process_id} - stderr: ${data.toString()}`);
-        // });
-
-        // pythonConvertXML2CSV.on("close", (code) => {
-        //     if (code === 0) {
-        //         console.log(`Job ${process_id} terminated with success.`);
-        //         jobs[process_id].status = "COMPLETED";
-        //         jobs[process_id].csvFile = outputCsvPath;
-        //     } else {
-        //         console.error(`Job ${process_id} failed with code ${code}`);
-        //         jobs[process_id].status = "ERROR";
-        //     }
-        //     // Remove the XML file
-        //     //fs.unlink(xmlFilePath, (err) => {
-        //     //    if (err) console.error(`Erreur during suppression of ${xmlFilePath}:`, err);
-        //     //});
-        // });
-        // Anwser to the client for polling
         res.status(202).json({ process_id });
     });
 });
@@ -165,8 +141,10 @@ app.get("/status/:process_id", (req, res) => {
 // Endpoint pour télécharger le fichier CSV une fois le traitement terminé
 app.get("/download/:process_id", (req, res) => {
     const process_id = req.params.process_id;
+    const outputPredPath = path.join(CURRENT_DIR, `net0_rts_${process_id}.dat`);
+    console.log("Output prediction file to push: ", outputPredPath);
     if (jobs[process_id] && jobs[process_id].status === "COMPLETED") {
-        res.download(jobs[process_id].csvFile, `./fwd_res/net0_rts`+process_id+`.dat`, (err) => {
+        res.download(jobs[process_id].predFile, outputPredPath, (err) => {
             if (err) {
                 res.status(500).json({ status: "ERROR", message: "Download error" });
             } else {

@@ -22,7 +22,7 @@ def verify_fits(file_path, min_size=1024):
 
     # Check the size of the file
     file_size = os.stat(file_path).st_size
-    print("File size:", file_size, "bytes")
+    #print("File size:", file_size, "bytes")
     if file_size < min_size:
         print("File is too small to be valid.")
         return False
@@ -30,15 +30,15 @@ def verify_fits(file_path, min_size=1024):
     # Try to open the file using astropy
     try:
         hdul = fits.open(file_path)
-        print("FITS file opened successfully.")
+        #print("FITS file opened successfully.")
 
         # Print the header of the first HDU (Header/Data Unit)
-        print("Header of the first HDU:")
-        print(hdul[0].header)
+        #print("Header of the first HDU:")
+        #print(hdul[0].header)
 
         # Optionally, print the complete structure of the FITS file
-        print("\nFITS file structure:")
-        hdul.info()
+        #print("\nFITS file structure:")
+        #hdul.info()
 
         # Close the file to free up resources
         hdul.close()

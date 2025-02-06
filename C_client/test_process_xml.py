@@ -1,3 +1,5 @@
+import sys, os
+
 import xml.etree.ElementTree as ET
 import requests
 import base64
@@ -18,7 +20,8 @@ URL_MODELS = f"http://127.0.0.1:3000/models/CIANNA_models.xml"
 LOCAL_FILE_MODELS = 'models/CIANNA_models.xml'
 
 
-def create_xml_param(user_id, ra, dec, h, w, image_path, quantization):
+def create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model,quantization):
+    from pprint import pprint
     # Créer la structure XML
     root = ET.Element("YOLO_CIANNA")
 
@@ -40,17 +43,19 @@ def create_xml_param(user_id, ra, dec, h, w, image_path, quantization):
     image_elem = ET.SubElement(root, "Image")
     ET.SubElement(image_elem, "Path").text = image_path
 
-    # Ajouter Quantization
+
+    yolo_model_elem = ET.SubElement(root, "YOLO_Model")
+    ET.SubElement(yolo_model_elem, "Name").text = yolo_model
+
     quantization_elem = ET.SubElement(root, "Quantization")
     quantization_elem.text = str(quantization)
 
     # Convertir la structure en une chaîne XML
     xml_data = ET.tostring(root, encoding="utf-8", method="xml")        
 
-    print("XML data:", xml_data)
-    print(50*".=")
+    # pprint(xml_data)
+    # print(50*".=")
     return xml_data
-
 
 def send_xml_fits_to_server(xml_data):
     """
@@ -60,7 +65,7 @@ def send_xml_fits_to_server(xml_data):
     try:
         root = ET.fromstring(xml_data)
         image_path = root.find('Image').find('Path').text
-        print("Image path in send_xml_fits_to_server:", image_path)
+        #print("Image path in send_xml_fits_to_server:", image_path)
         if not image_path:
             print("Error: Image path not found in XML data")
             return None
@@ -70,7 +75,7 @@ def send_xml_fits_to_server(xml_data):
     
     try:
         with open(image_path, "rb") as fits_file:
-            print("FITS file opened successfully")
+            #print("FITS file opened successfully")
             files = {
                 "xml": ("data.xml", xml_data, "application/xml"),
                 "fits": ("image.fits", fits_file, "application/octet-stream")
@@ -85,7 +90,7 @@ def send_xml_fits_to_server(xml_data):
     
     if response.status_code == 202:
         process_id = response.json().get("process_id")
-        print(f"Processing started with ID: {process_id}")
+        #print(f"Processing started with ID: {process_id}")
         return process_id
     else:
         print("Error sending data:", response.text)
@@ -134,7 +139,7 @@ def send_image_to_server(image_path):
     
     if response.status_code == 202:
         process_id = response.json().get("process_id")
-        print(f"Processing started with ID: {process_id}")
+        #print(f"Processing started with ID: {process_id}")
         return process_id
     else:
         print("Error sending image:", response.text)
@@ -153,8 +158,8 @@ def poll_for_completion(process_id):
         response = requests.get(f"{SERVER_URL}/status/{process_id}")
         if response.status_code == 200:
             status = response.json().get("status")
-            print(f"Process {process_id} current status: {status}")
             if status == "COMPLETED":
+                print(f"Process {process_id} current status: {status}")
                 return True
             elif status == "ERROR":
                 print(f"Process {process_id} processing failed!")
@@ -170,13 +175,63 @@ def download_csv(process_id):
     """
     
     response = requests.get(f"{SERVER_URL}/download/{process_id}")
-    cvs_file = f"output_{process_id}.csv"
+    pred_file = f"net0_rts"+process_id+".dat"
     if response.status_code == 200:
-        with open(cvs_file, "wb") as file:
+        with open(pred_file, "wb") as file:
             file.write(response.content)
-        print(f"CSV file saved as {cvs_file}")
+        print(f"Prediction file saved as {pred_file}")
     else:
-        print("Error downloading CSV:", response.text)
+        print("Error downloading Prediction file:", response.text)
+
+def visualize_image(image_path, clip_min=99.4, clip_max=99.8):
+    """
+        Function to visualize the image
+    """
+    import matplotlib.pyplot as plt
+    from astropy.io import fits
+    from astropy.wcs import WCS
+    from matplotlib import rcParams
+    from matplotlib import gridspec
+    from matplotlib import rc
+    from IPython.display import display
+
+    import numpy as np
+    import matplotlib
+    matplotlib.use('TkAgg')
+
+    with fits.open(image_path, memmap=True) as hdul:
+        full_img = hdul[0].data[0,0]              # Drop extra axes
+        wcs_img = WCS(hdul[0].header)
+        wcs_img = wcs_img.dropaxis(2).dropaxis(2) # Drop extra axes
+        hdul.close()
+
+    # Data clipping    
+    min_pix = np.percentile(full_img, clip_min)
+    max_pix = np.percentile(full_img, clip_max)
+    full_data_norm = np.clip(full_img, min_pix, max_pix)
+
+    fig, ax = plt.subplots(1, 3, figsize=(10, 5))
+
+    ax[0].imshow(full_img, cmap='viridis', origin='lower')
+    ax[0].set_xlabel('RA')
+    ax[0].set_ylabel('Dec')
+    ax[0].set_title("Image", fontsize=6)
+
+    ax[1].imshow(full_data_norm, cmap='viridis', origin='lower')
+    ax[1].set_xlabel('RA')
+    ax[1].set_ylabel('Dec')
+    ax[1].set_title("Image clipped", fontsize=6)    
+
+    ax[2].hist(full_data_norm.flatten(), bins=100, 
+                        alpha=0.5, color='r', label='Clipped image')
+    ax[2].legend(loc='upper right', fontsize=6)
+    ax[2].set_xlabel('Pixel value')
+    ax[2].set_ylabel('Number of pixels')
+    ax[2].set_title('Histograms')
+    ax[2].set_yscale('log')
+
+    plt.show()
+
 
 
 def emulate_client_request(request_number: int):
@@ -191,11 +246,15 @@ def emulate_client_request(request_number: int):
     dec = random.uniform(-90, 90)
     h = random.randint(50, 200)
     w = random.randint(50, 200)
-    image_path = "images/RACS-DR1_0000+12A.fits"  # Chemin vers une image locale
-    quantization = 256
+    image_path = "images/RACS-DR1_0000+12A.fits" # Path to local image
+    yolo_model = "net0_s1800.dat"
+    quantization = "FP32C_FP32A"
 
-    xml_data = create_xml_param(user_id, ra, dec, h, w, image_path, quantization)
-    #process_id = send_xml_to_server(xml_data)
+    # Visualize the image
+    # visualize_image(image_path)
+
+    xml_data = create_xml_param(user_id, ra, dec, h, w, image_path,
+                                yolo_model, quantization)
     process_id = send_xml_fits_to_server(xml_data)
     if process_id is not None:
         if poll_for_completion(process_id):
@@ -205,18 +264,29 @@ def emulate_client_request(request_number: int):
 
 def main():
 
+    # Update of the XML file from the server containing the CIANNA models
     update_result = update_cianna_models(URL_MODELS, LOCAL_FILE_MODELS)
     if update_result is None:
         print("EXIT: Error during XML update.")
         return
 
+
+    # Data clipping
+    clip_min = 99.4
+    clip_max = 99.8
+    image_path = "images/RACS-DR1_0000+12A.fits" # Path to local image
+
+    # Visualize the image
+    # visualize_image(image_path, clip_min, clip_max)
+    # sys.exit("STOP")
+
     # Emulate multiple clients
-    nb_requetes = 3
-    with ThreadPoolExecutor(max_workers=nb_requetes) as executor:
-        futures = [executor.submit(emulate_client_request, i+1) for i in range(nb_requetes)]
+    # All of this will be replaced by the client code from the GUI application
+    nb_requests = 1
+    with ThreadPoolExecutor(max_workers=nb_requests) as executor:
+        futures = [executor.submit(emulate_client_request, i+1) for i in range(nb_requests)]
         for future in futures:
             future.result()
-
 
 if __name__ == '__main__':
     main()
